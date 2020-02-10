@@ -1,0 +1,100 @@
+---
+title: "Assignment2"
+author: "Devin Teran"
+date: "2/9/2020"
+output: html_document
+---
+# Latest movie analysis ## 
+**Overview:**  
+This analyis focuses on the most popular movies from a short survey from volunteers.  The survey included 6 movies and participants ranked their favorites from 1-5.
+
+Additional information was retrieved from RottenTomatoes.com.  This site ranks movies from 0% (a rotten movie) to 100% (a ripe tomato).  The data ranked the top 50 top grossing films over the weekend from January 10-12th, 2020.
+
+The data was loaded from csv into MySQL and then pulled into RStudio and analyzed.
+
+*Sources:*  
+<https://www.rottentomatoes.com/browse/box-office/?rank_id=4&country=us>  
+<https://www.rottentomatoes.com/>
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(dplyr)
+library(RMySQL)
+library(ggplot2)
+con <- dbConnect(MySQL(),user='user',password ='password',dbname='movies',host='host')
+
+```
+
+## Get Data
+Query from MySQL and retrieve data from tables in the movies database.
+```{r retrieve-clean-survey-data}
+surveyRatingsRaw <- dbGetQuery(con,'SELECT * FROM movies.movieRatings;')
+avgSurveyRatingsRaw <- dbGetQuery(con,'SELECT * FROM movies.averageMovieRatings')
+
+head(surveyRatingsRaw)
+head(avgSurveyRatingsRaw)
+```
+
+## Analysis
+Let's see what the survey respondents thought about each movie. 
+```{r plot-movie-ratings}
+ggplot(data = avgSurveyRatingsRaw,aes(reorder(x=movie,-avg_rating),y=avg_rating)) + geom_bar(stat= "identity") + xlab("Movie") + ylab("Average Survey Rating") + ggtitle("Average Movie Ratings from Survey on Scale 1-5") + theme(plot.title = element_text(hjust = 0.50))
+
+```
+  
+The surveys show that people enjoyed the Joker and most disliked The Turning.
+
+## Clean and retrieve data from Rotten Tomatoes
+This data was found on the rotten tomatoes website.  Not all movies from the survey are in the top 50 grossing movies for the weekend of January 10-12,2020
+```{r retrieve_and_clean_rotten_tomato_scores}
+url_path <- "https://raw.githubusercontent.com/devinteran/Data607_Assignment2/master/January.10-12.2020.TopBoxOfficeMovies%20-%20Sheet1.csv"
+
+#Make sure Week Released is an integer
+rottenTomatoScoreRaw <- read_csv(url_path,col_types = cols('WEEKS RELEASED' = col_integer()))
+rottenTomatoScoreRaw <- na.omit(rottenTomatoScoreRaw)
+
+#Change Column Names
+names(rottenTomatoScoreRaw) <- c("Week","Score","Title","Weeks_Released","Weekend_Gross")
+```
+
+## Analyze Rotten Tomato Data
+Some questions I would like to answer include:  
+  - Does the rotten tomatoe score correlate with weekend gross amount for newer movies?  Assume Week < 4.
+```{r rotten-tomato-vs-weekend-gross-under-5-week}
+movies_in_past_month <- rottenTomatoScoreRaw[rottenTomatoScoreRaw$Weeks_Released < 4,]
+options(scipen=10000)
+ggplot(movies_in_past_month,aes(x=`Weekend_Gross`,y=`Score`,color = Title))+geom_point() + ggtitle('Rotten Tomato Scores VS. Weekend Gross (Movies within Past 3 Weeks)')
+```  
+  
+The Grudge is a very low scoring rotten tomato film but it was the 2nd top grossing film.
+
+```{r combine-data-sources}
+rottenTomatoData <- rottenTomatoScoreRaw %>% filter(Title %in% avgSurveyRatingsRaw$movie)
+rottenTomatoScore <- rottenTomatoData  %>% select("Score","Title")
+
+#Manually lookup the rotten tomato score for any movies in avgMoviesRatingsRaw but not in rottenTomatoScore
+rottenTomatoScore <- add_row(rottenTomatoScore,'Score' = 87,'Title' = "Hustlers")
+rottenTomatoScore <- add_row(rottenTomatoScore,'Score' = 13,'Title' = "The Turning")
+rottenTomatoScore
+```
+
+## Combined Analysis
+Do the rotten tomato tomato meter scores correlate with the survey results?
+```{r score-vs-ratings}
+combo <- avgSurveyRatingsRaw %>% inner_join(rottenTomatoScore,by = c("movie" = "Title"))
+ggplot(combo, aes(x=combo$avg_rating, y=rottenTomatoScore$'Score',color = combo$movie)) + geom_point() + xlab("Survey Rating") + ylab("Rotten Tomato Score")
+
+```
+  
+It appears that the survey rating and the rotten tomate score is not correlated.  Again, The Turning is a horry movie, so it appears that genre may be anothe variable to look into in future analysis.  Here the movie received high rotten tomato scores but viewer did not like it.
+
+```{r close-db-con, results='hide'}
+dbDisconnect(con)
+```
+
+## Conclusions
+Additional items to analyze would be the weekend gross amount over time as the number of weeks released.  This would involved obtaining multiple reports from the rotten tomatoes website.  It would be interesting to see if there is a way to automatically scrape the website for these files.
+
+I also wonder how genre plays into top grossing films.  Do horror and thriller movies make as much as drama films?
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
